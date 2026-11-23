@@ -1,0 +1,53 @@
+syntax = "proto3";
+
+package fx.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option java_multiple_files = true;
+option java_package = "io.github.marvinds1.fx.api.v1";
+option java_outer_classname = "FxServiceProto";
+
+// Prices currency conversions and locks the price for a short time.
+service FxService {
+  // Prices converting `sell_amount_minor` of `sell_currency` into `buy_currency` and locks
+  // the result for a short time. INVALID_ARGUMENT for unsupported currencies or amounts.
+  rpc CreateQuote(CreateQuoteRequest) returns (Quote);
+
+  // Consumes a quote exactly once. NOT_FOUND when it expired or was already redeemed.
+  rpc RedeemQuote(RedeemQuoteRequest) returns (Quote);
+
+  // Indicative mid rates against a base currency (not lockable).
+  rpc ListRates(ListRatesRequest) returns (ListRatesResponse);
+}
+
+message CreateQuoteRequest {
+  string sell_currency = 1;     // ISO 4217, e.g. "IDR"
+  string buy_currency = 2;      // ISO 4217, e.g. "USD"
+  int64 sell_amount_minor = 3;  // amount in minor units of sell_currency
+}
+
+message Quote {
+  string quote_id = 1;
+  string sell_currency = 2;
+  string buy_currency = 3;
+  int64 sell_amount_minor = 4;
+  int64 buy_amount_minor = 5;
+  string mid_rate = 6;          // decimal string, buy units per 1 sell unit
+  string customer_rate = 7;     // mid rate minus spread
+  int32 spread_bps = 8;
+  google.protobuf.Timestamp expires_at = 9;
+}
+
+message RedeemQuoteRequest {
+  string quote_id = 1;
+}
+
+message ListRatesRequest {
+  string base_currency = 1;
+}
+
+message ListRatesResponse {
+  string base_currency = 1;
+  map<string, string> mid_rates = 2;  // currency -> units per 1 base unit
+}

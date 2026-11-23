@@ -1,0 +1,25 @@
+spring:
+  application:
+    name: fx-rate-service
+  main:
+    web-application-type: none
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+
+grpc:
+  port: ${GRPC_PORT:9090}
+
+# Demo mid-market rates (units per 1 USD). In production these come from a market data feed.
+fx:
+  spread-bps: 50
+  quote-ttl: 30s
+  rates-per-usd:
+    USD: 1
+    IDR: 16250
+    SGD: 1.3420
+    MYR: 4.4650
+    EUR: 0.9210
+    JPY: 151.80
+    AUD: 1.5370
