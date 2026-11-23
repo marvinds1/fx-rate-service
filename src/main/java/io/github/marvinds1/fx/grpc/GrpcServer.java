@@ -54,6 +54,9 @@ public class GrpcServer implements SmartLifecycle {
 
     @Override
     public void stop() {
+        if (server == null) {
+            return;
+        }
         health.enterTerminalState();
         server.shutdown();
         try {

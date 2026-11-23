@@ -68,14 +68,12 @@ public class Pricer {
     }
 
     public Map<String, BigDecimal> midRates(String base) {
+        rate(base);
         Map<String, BigDecimal> result = new TreeMap<>();
         for (String code : ratesPerUsd.keySet()) {
             if (!code.equals(base)) {
                 result.put(code, midRate(base, code).stripTrailingZeros());
             }
-        }
-        if (!ratesPerUsd.containsKey(base)) {
-            throw new PricingException("unsupported currency " + base);
         }
         return result;
     }
