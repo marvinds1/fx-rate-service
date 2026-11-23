@@ -96,6 +96,7 @@ Requirements: Java 17, Maven, Docker.
 
 ```bash
 docker compose up --build    # Redis + the service on :9090
+GRPC_HOST_PORT=19090 docker compose up --build   # if 9090 is taken (e.g. by Prometheus)
 mvn verify                   # unit tests + gRPC integration tests (Testcontainers Redis)
 ```
 
