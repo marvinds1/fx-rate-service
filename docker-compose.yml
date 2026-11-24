@@ -16,5 +16,6 @@ services:
         condition: service_healthy
     environment:
       REDIS_HOST: redis
+      FX_API_KEYS: ${FX_API_KEYS:-}
     ports:
       - "${GRPC_HOST_PORT:-9090}:9090"

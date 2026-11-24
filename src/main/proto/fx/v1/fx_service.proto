@@ -12,9 +12,11 @@ option java_outer_classname = "FxServiceProto";
 service FxService {
   // Prices converting `sell_amount_minor` of `sell_currency` into `buy_currency` and locks
   // the result for a short time. INVALID_ARGUMENT for unsupported currencies or amounts.
+  // With `request_id`, retries return the same quote instead of creating a new one.
   rpc CreateQuote(CreateQuoteRequest) returns (Quote);
 
-  // Consumes a quote exactly once. NOT_FOUND when it expired or was already redeemed.
+  // Consumes a quote exactly once. NOT_FOUND when it expired, was already redeemed or
+  // belongs to another client.
   rpc RedeemQuote(RedeemQuoteRequest) returns (Quote);
 
   // Indicative mid rates against a base currency (not lockable).
@@ -25,6 +27,7 @@ message CreateQuoteRequest {
   string sell_currency = 1;     // ISO 4217, e.g. "IDR"
   string buy_currency = 2;      // ISO 4217, e.g. "USD"
   int64 sell_amount_minor = 3;  // amount in minor units of sell_currency
+  string request_id = 4;        // optional idempotency key chosen by the client (max 64 chars)
 }
 
 message Quote {
@@ -40,7 +43,7 @@ message Quote {
 }
 
 message RedeemQuoteRequest {
-  string quote_id = 1;
+  string quote_id = 1;          // UUID returned by CreateQuote
 }
 
 message ListRatesRequest {

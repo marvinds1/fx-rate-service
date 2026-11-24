@@ -22,6 +22,7 @@ public class Pricer {
 
     private final Map<String, BigDecimal> ratesPerUsd;
     private final int spreadBps;
+    private final BigDecimal maxQuoteUsd;
 
     public Pricer(FxProperties properties) {
         this.ratesPerUsd = new TreeMap<>(properties.ratesPerUsd());
@@ -32,6 +33,7 @@ public class Pricer {
             }
         });
         this.spreadBps = properties.spreadBps();
+        this.maxQuoteUsd = properties.maxQuoteUsd();
     }
 
     public Price price(String sellCurrency, String buyCurrency, long sellAmountMinor) {
@@ -48,6 +50,9 @@ public class Pricer {
         int sellDigits = Currency.getInstance(sellCurrency).getDefaultFractionDigits();
         int buyDigits = Currency.getInstance(buyCurrency).getDefaultFractionDigits();
         BigDecimal sellMajor = BigDecimal.valueOf(sellAmountMinor).movePointLeft(sellDigits);
+        if (sellMajor.divide(rate(sellCurrency), PRECISION).compareTo(maxQuoteUsd) > 0) {
+            throw new PricingException("amount exceeds the per-quote limit of " + maxQuoteUsd.toPlainString() + " USD");
+        }
         BigDecimal buyMinor = sellMajor.multiply(customer).movePointRight(buyDigits)
                 .setScale(0, RoundingMode.DOWN);
 

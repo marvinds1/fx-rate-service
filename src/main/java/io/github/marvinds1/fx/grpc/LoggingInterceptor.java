@@ -8,10 +8,15 @@ import io.grpc.ServerInterceptor;
 import io.grpc.Status;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 
-/** One access-log line per call: method, status code and latency. */
+/**
+ * One access-log line per call: client, method, status code and latency. Ordered after the
+ * auth interceptor in the list, which makes it the outermost one, so rejected calls are logged too.
+ */
 @Component
+@Order(2)
 public class LoggingInterceptor implements ServerInterceptor {
 
     private static final Logger log = LoggerFactory.getLogger("grpc.access");
@@ -23,7 +28,8 @@ public class LoggingInterceptor implements ServerInterceptor {
         return next.startCall(new SimpleForwardingServerCall<>(call) {
             @Override
             public void close(Status status, Metadata trailers) {
-                log.info("{} {} {}ms", call.getMethodDescriptor().getFullMethodName(), status.getCode(),
+                log.info("{} {} {} {}ms", ApiKeyInterceptor.CLIENT_ID.get(),
+                        call.getMethodDescriptor().getFullMethodName(), status.getCode(),
                         (System.nanoTime() - start) / 1_000_000);
                 super.close(status, trailers);
             }

@@ -12,13 +12,16 @@ import io.github.marvinds1.fx.pricing.PricingException;
 import io.github.marvinds1.fx.quote.LockedQuote;
 import io.github.marvinds1.fx.quote.QuoteNotFoundException;
 import io.github.marvinds1.fx.quote.QuoteService;
+import io.grpc.Context;
 import io.grpc.Status;
 import io.grpc.stub.StreamObserver;
 import java.util.Locale;
+import java.util.UUID;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -26,6 +29,7 @@ public class FxGrpcService extends FxServiceGrpc.FxServiceImplBase {
 
     private static final Logger log = LoggerFactory.getLogger(FxGrpcService.class);
     private static final Pattern CURRENCY = Pattern.compile("[A-Z]{3}");
+    private static final Pattern REQUEST_ID = Pattern.compile("[A-Za-z0-9._:-]{1,64}");
 
     private final QuoteService quotes;
     private final Pricer pricer;
@@ -37,19 +41,28 @@ public class FxGrpcService extends FxServiceGrpc.FxServiceImplBase {
 
     @Override
     public void createQuote(CreateQuoteRequest request, StreamObserver<Quote> response) {
-        respond(response, () -> toProto(quotes.create(
-                currency(request.getSellCurrency(), "sell_currency"),
-                currency(request.getBuyCurrency(), "buy_currency"),
-                request.getSellAmountMinor())));
+        respond(response, () -> {
+            String requestId = request.getRequestId();
+            if (!requestId.isEmpty() && !REQUEST_ID.matcher(requestId).matches()) {
+                throw new PricingException("request_id must be 1-64 characters of [A-Za-z0-9._:-]");
+            }
+            return toProto(quotes.create(client(),
+                    currency(request.getSellCurrency(), "sell_currency"),
+                    currency(request.getBuyCurrency(), "buy_currency"),
+                    request.getSellAmountMinor(), requestId));
+        });
     }
 
     @Override
     public void redeemQuote(RedeemQuoteRequest request, StreamObserver<Quote> response) {
         respond(response, () -> {
-            if (request.getQuoteId().isBlank()) {
-                throw new PricingException("quote_id is required");
+            String id = request.getQuoteId();
+            try {
+                UUID.fromString(id);
+            } catch (IllegalArgumentException e) {
+                throw new PricingException("quote_id must be a UUID");
             }
-            return toProto(quotes.redeem(request.getQuoteId()));
+            return toProto(quotes.redeem(client(), id));
         });
     }
 
@@ -63,7 +76,15 @@ public class FxGrpcService extends FxServiceGrpc.FxServiceImplBase {
         });
     }
 
+    private static String client() {
+        return ApiKeyInterceptor.CLIENT_ID.get();
+    }
+
     private static <T> void respond(StreamObserver<T> observer, Supplier<T> call) {
+        if (Context.current().isCancelled()) {
+            observer.onError(Status.CANCELLED.withDescription("call cancelled or deadline exceeded").asRuntimeException());
+            return;
+        }
         T result;
         try {
             result = call.get();
@@ -72,6 +93,10 @@ public class FxGrpcService extends FxServiceGrpc.FxServiceImplBase {
             return;
         } catch (QuoteNotFoundException e) {
             observer.onError(Status.NOT_FOUND.withDescription(e.getMessage()).asRuntimeException());
+            return;
+        } catch (DataAccessException e) {
+            log.warn("redis unavailable: {}", e.getMessage());
+            observer.onError(Status.UNAVAILABLE.withDescription("quote store unavailable, retry").asRuntimeException());
             return;
         } catch (RuntimeException e) {
             log.error("unexpected error", e);

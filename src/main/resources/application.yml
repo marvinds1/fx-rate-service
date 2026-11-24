@@ -7,14 +7,22 @@ spring:
     redis:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
+      timeout: 500ms
+      connect-timeout: 1s
 
 grpc:
   port: ${GRPC_PORT:9090}
+  threads: ${GRPC_THREADS:32}
+  # client-id:secret pairs, comma-separated. Empty = authentication disabled (local dev only).
+  api-keys: ${FX_API_KEYS:}
+  # Lets grpcurl/Postman discover the API. Disable in production unless you need it.
+  reflection-enabled: ${GRPC_REFLECTION_ENABLED:true}
 
 # Demo mid-market rates (units per 1 USD). In production these come from a market data feed.
 fx:
   spread-bps: 50
   quote-ttl: 30s
+  max-quote-usd: 1000000
   rates-per-usd:
     USD: 1
     IDR: 16250

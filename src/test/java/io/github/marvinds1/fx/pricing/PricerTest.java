@@ -14,7 +14,7 @@ class PricerTest {
             "USD", BigDecimal.ONE,
             "IDR", new BigDecimal("16250"),
             "SGD", new BigDecimal("1.3420"),
-            "JPY", new BigDecimal("151.80")), 50, Duration.ofSeconds(30)));
+            "JPY", new BigDecimal("151.80")), 50, Duration.ofSeconds(30), new BigDecimal("1000000")));
 
     @Test
     void convertsIdrToUsdWithSpreadAndRoundsDown() {
@@ -47,12 +47,19 @@ class PricerTest {
         assertThatThrownBy(() -> pricer.price("USD", "USD", 100)).hasMessageContaining("must differ");
         assertThatThrownBy(() -> pricer.price("USD", "GBP", 100)).hasMessageContaining("unsupported currency GBP");
         assertThatThrownBy(() -> pricer.price("IDR", "USD", 1)).hasMessageContaining("too small");
-        assertThatThrownBy(() -> pricer.price("USD", "IDR", Long.MAX_VALUE)).hasMessageContaining("too large");
+        assertThatThrownBy(() -> pricer.price("USD", "IDR", Long.MAX_VALUE)).hasMessageContaining("per-quote limit");
     }
 
     @Test
     void listsMidRatesForABase() {
         assertThat(pricer.midRates("USD")).containsOnlyKeys("IDR", "SGD", "JPY")
                 .extractingByKey("IDR").satisfies(r -> assertThat(r).isEqualByComparingTo("16250"));
+    }
+
+    @Test
+    void enforcesPerQuoteLimitInUsdEquivalent() {
+        assertThat(pricer.price("USD", "IDR", 100_000_000L).buyAmountMinor()).isPositive();
+        assertThatThrownBy(() -> pricer.price("USD", "IDR", 100_000_001L)).hasMessageContaining("per-quote limit");
+        assertThatThrownBy(() -> pricer.price("IDR", "USD", 16_250_000_000_01L)).hasMessageContaining("per-quote limit");
     }
 }

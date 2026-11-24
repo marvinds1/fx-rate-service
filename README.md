@@ -22,6 +22,19 @@ cross-currency transfer, the ledger redeems a quote and books both legs at the l
 | Contract-first API | Protobuf schema in [`src/main/proto`](src/main/proto/fx/v1/fx_service.proto), versioned package `fx.v1`. Errors use gRPC status codes (`INVALID_ARGUMENT`, `NOT_FOUND`) with readable descriptions. |
 | Operability | Standard gRPC health service, server reflection (works with `grpcurl` / Postman), one access-log line per call (method, status, latency), graceful shutdown inside the Spring lifecycle. |
 
+## Security, performance and concurrency
+
+| Risk | Guard |
+|---|---|
+| Unauthenticated access | `x-api-key` metadata checked by a server interceptor when `FX_API_KEYS` is set (`client-id:secret` pairs, ≥16-char secrets, several per client for rotation), compared in constant time. Health is open; reflection can be switched off (`GRPC_REFLECTION_ENABLED=false`). |
+| Quote theft / quote burning | Quotes are stored per client (`fx:{client}:quote:{id}`). Another client's redeem looks up a different key, so it can neither use nor consume someone else's quote. Quote ids must be UUIDs. |
+| Double redemption | `GETDEL` is atomic: of 8 concurrent redeems exactly one succeeds (tested). |
+| Retried `CreateQuote` | Optional `request_id`: a Lua script stores the request id and the quote together with `SET NX`, so concurrent retries all get the same quote (tested with 8 in parallel). Reusing an id with different parameters → `INVALID_ARGUMENT`. |
+| Abuse / oversized calls | 16 KB message and 8 KB metadata limits (`RESOURCE_EXHAUSTED`), 100 concurrent calls per connection, per-quote limit of 1,000,000 USD equivalent, strict input validation. |
+| Thread exhaustion | Handler pool is fixed size (`GRPC_THREADS`, default 32) instead of grpc-java's default unbounded cached pool. Idle connections are closed after 5 min and recycled after 30 min so load rebalances across replicas. |
+| Slow or down Redis | 500 ms command timeout, 1 s connect timeout; failures map to `UNAVAILABLE` (retryable) instead of `INTERNAL`. Calls whose deadline already passed are not processed. |
+| Redis Cluster | Keys use a `{client}` hash tag so the Lua script's keys always live in one slot. |
+
 ## Flow
 
 ```mermaid
@@ -45,15 +58,17 @@ sequenceDiagram
 
 | RPC | Description |
 |---|---|
-| `CreateQuote(sell_currency, buy_currency, sell_amount_minor)` | Price and lock a conversion |
-| `RedeemQuote(quote_id)` | Consume a quote exactly once |
+| `CreateQuote(sell_currency, buy_currency, sell_amount_minor, request_id?)` | Price and lock a conversion; idempotent with `request_id` |
+| `RedeemQuote(quote_id)` | Consume a quote exactly once (only by the client that created it) |
 | `ListRates(base_currency)` | Indicative mid rates against a base (not lockable) |
 | `grpc.health.v1.Health/Check` | Health |
 
-With [grpcurl](https://github.com/fullstorydev/grpcurl) (reflection is enabled, no proto file needed):
+With **Postman** (New → gRPC, URL `localhost:9090`, *Use server reflection*, add metadata
+`x-api-key: <secret>` when keys are configured) or [grpcurl](https://github.com/fullstorydev/grpcurl):
 
 ```bash
-grpcurl -plaintext -d '{"sell_currency":"IDR","buy_currency":"USD","sell_amount_minor":100000000}' \
+grpcurl -plaintext -H "x-api-key: $FX_API_KEY" \
+  -d '{"sell_currency":"IDR","buy_currency":"USD","sell_amount_minor":100000000,"request_id":"checkout-42"}' \
   localhost:9090 fx.v1.FxService/CreateQuote
 ```
 
@@ -72,7 +87,8 @@ grpcurl -plaintext -d '{"sell_currency":"IDR","buy_currency":"USD","sell_amount_
 ```
 
 ```bash
-grpcurl -plaintext -d '{"quote_id":"5b0d6c1e-…"}' localhost:9090 fx.v1.FxService/RedeemQuote
+grpcurl -plaintext -H "x-api-key: $FX_API_KEY" -d '{"quote_id":"5b0d6c1e-…"}' \
+  localhost:9090 fx.v1.FxService/RedeemQuote
 ```
 
 ## Configuration
@@ -81,6 +97,7 @@ grpcurl -plaintext -d '{"quote_id":"5b0d6c1e-…"}' localhost:9090 fx.v1.FxServi
 fx:
   spread-bps: 50          # 0.50%
   quote-ttl: 30s
+  max-quote-usd: 1000000  # per-quote limit, USD equivalent of the sell side
   rates-per-usd:          # demo mid-market rates
     USD: 1
     IDR: 16250
@@ -88,7 +105,9 @@ fx:
     JPY: 151.80
 ```
 
-Environment: `GRPC_PORT` (default 9090), `REDIS_HOST`, `REDIS_PORT`.
+Environment: `FX_API_KEYS` (e.g. `mobile:<secret>,ledger:<secret>`; empty disables auth with a
+startup warning — local development only), `GRPC_PORT` (default 9090), `GRPC_THREADS`,
+`GRPC_REFLECTION_ENABLED`, `REDIS_HOST`, `REDIS_PORT`.
 
 ## Running locally
 
@@ -106,15 +125,14 @@ mvn verify                   # unit tests + gRPC integration tests (Testcontaine
 src/main/proto/fx/v1/         Protobuf contract (Java stubs are generated at build time)
 src/main/java/io/github/marvinds1/fx/
   pricing/    Pricer (rate math), FxProperties
-  quote/      QuoteService, Redis QuoteStore (SET EX / GETDEL)
-  grpc/       FxGrpcService, GrpcServer lifecycle, access-log interceptor
+  quote/      QuoteService, Redis QuoteStore (per-client keys, GETDEL, Lua for idempotency)
+  grpc/       FxGrpcService, GrpcServer lifecycle and limits, API key + access-log interceptors
 ```
 
 ## Roadmap
 
 - Pull rates from a market data feed and refresh them on a schedule, with a staleness guard that refuses to quote on old rates.
 - Per-customer-segment spreads and amount tiers.
-- Idempotent `CreateQuote` with a client request id.
 - Publish `fx.quote-redeemed` events so the ledger books FX gains/losses.
 - Micrometer metrics for quote/redeem rate and expiry ratio.
 
