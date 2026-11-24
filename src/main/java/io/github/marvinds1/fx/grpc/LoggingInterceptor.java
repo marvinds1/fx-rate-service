@@ -6,6 +6,7 @@ import io.grpc.ServerCall;
 import io.grpc.ServerCallHandler;
 import io.grpc.ServerInterceptor;
 import io.grpc.Status;
+import java.util.Objects;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.annotation.Order;
@@ -28,7 +29,7 @@ public class LoggingInterceptor implements ServerInterceptor {
         return next.startCall(new SimpleForwardingServerCall<>(call) {
             @Override
             public void close(Status status, Metadata trailers) {
-                log.info("{} {} {} {}ms", ApiKeyInterceptor.CLIENT_ID.get(),
+                log.info("{} {} {} {}ms", Objects.requireNonNullElse(ApiKeyInterceptor.CLIENT_ID.get(), "-"),
                         call.getMethodDescriptor().getFullMethodName(), status.getCode(),
                         (System.nanoTime() - start) / 1_000_000);
                 super.close(status, trailers);
